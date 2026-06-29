@@ -7,283 +7,66 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
-    /* ── TOKENS ── */
     :root {
-      --bg:       #F5F4F1;
-      --surface:  #FFFFFF;
-      --surface2: #F0EFEC;
-      --text:     #1E2030;
-      --muted:    #8E919E;
-      --border:   #E2E0D8;
-      --accent:   #8FAE8E;
-      --accent2:  #6B9369;
-      --shadow:   0 2px 16px rgba(0,0,0,0.07);
+      --bg:#F5F4F1;--surface:#FFFFFF;--surface2:#F0EFEC;--text:#1E2030;
+      --muted:#8E919E;--border:#E2E0D8;--accent:#8FAE8E;--accent2:#6B9369;
+      --shadow:0 2px 16px rgba(0,0,0,0.07);
     }
     [data-theme="dark"] {
-      --bg:       #181B27;
-      --surface:  #21253A;
-      --surface2: #2A2F45;
-      --text:     #E4E2DC;
-      --muted:    #6B6F85;
-      --border:   #2E3347;
-      --shadow:   0 2px 16px rgba(0,0,0,0.3);
+      --bg:#181B27;--surface:#21253A;--surface2:#2A2F45;--text:#E4E2DC;
+      --muted:#6B6F85;--border:#2E3347;--shadow:0 2px 16px rgba(0,0,0,0.3);
     }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      font-family: 'Inter', system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      transition: background 0.3s, color 0.3s;
-    }
-
-    /* ── LOCK SCREEN ── */
-    #lock {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      padding: 24px;
-    }
-    .lock-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 24px;
-      padding: 48px 40px;
-      width: 100%;
-      max-width: 380px;
-      text-align: center;
-      box-shadow: var(--shadow);
-    }
-    .lock-icon {
-      width: 56px; height: 56px;
-      border-radius: 16px;
-      background: var(--accent);
-      display: flex; align-items: center; justify-content: center;
-      margin: 0 auto 24px;
-      font-size: 26px;
-    }
-    .lock-title {
-      font-size: 22px;
-      font-weight: 800;
-      letter-spacing: -0.5px;
-      margin-bottom: 6px;
-    }
-    .lock-sub {
-      font-size: 13px;
-      color: var(--muted);
-      margin-bottom: 28px;
-    }
-    .lock-input {
-      width: 100%;
-      padding: 14px 18px;
-      border-radius: 12px;
-      border: 1.5px solid var(--border);
-      background: var(--surface2);
-      color: var(--text);
-      font-size: 16px;
-      font-family: inherit;
-      outline: none;
-      text-align: center;
-      letter-spacing: 0.15em;
-      margin-bottom: 12px;
-      transition: border-color 0.2s;
-    }
-    .lock-input:focus { border-color: var(--accent); }
-    .lock-btn {
-      width: 100%;
-      padding: 14px;
-      border-radius: 12px;
-      border: none;
-      background: var(--accent);
-      color: #fff;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      font-family: inherit;
-      transition: background 0.2s;
-    }
-    .lock-btn:hover { background: var(--accent2); }
-    .lock-error {
-      font-size: 13px;
-      color: #F87171;
-      margin-top: 10px;
-      min-height: 18px;
-    }
-
-    /* ── MAIN HUB ── */
-    #hub { display: none; }
-
-    header {
-      max-width: 680px;
-      margin: 0 auto;
-      padding: 32px 20px 0;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .header-left h1 {
-      font-size: 26px;
-      font-weight: 800;
-      letter-spacing: -0.6px;
-    }
-    .header-left p {
-      font-size: 13px;
-      color: var(--muted);
-      margin-top: 3px;
-    }
-    .theme-btn {
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 8px 12px;
-      cursor: pointer;
-      color: var(--muted);
-      font-size: 16px;
-      transition: border-color 0.2s;
-    }
-    .theme-btn:hover { border-color: var(--accent); }
-
-    /* ── GRID ── */
-    .grid {
-      max-width: 680px;
-      margin: 28px auto 0;
-      padding: 0 20px 48px;
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 14px;
-    }
-    @media (max-width: 480px) {
-      .grid { grid-template-columns: 1fr; }
-    }
-
-    .tool-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 24px;
-      text-decoration: none;
-      color: var(--text);
-      display: block;
-      transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
-      box-shadow: var(--shadow);
-      position: relative;
-      overflow: hidden;
-    }
-    .tool-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(0,0,0,0.10);
-      border-color: var(--accent);
-    }
-    .tool-card.soon {
-      opacity: 0.5;
-      cursor: default;
-      pointer-events: none;
-    }
-    .tool-card.soon:hover { transform: none; }
-
-    .card-icon {
-      font-size: 28px;
-      margin-bottom: 14px;
-      display: block;
-    }
-    .card-name {
-      font-size: 16px;
-      font-weight: 700;
-      margin-bottom: 5px;
-      letter-spacing: -0.3px;
-    }
-    .card-desc {
-      font-size: 13px;
-      color: var(--muted);
-      line-height: 1.5;
-    }
-    .card-arrow {
-      position: absolute;
-      bottom: 22px;
-      right: 22px;
-      font-size: 16px;
-      color: var(--accent);
-      opacity: 0;
-      transform: translateX(-4px);
-      transition: opacity 0.15s, transform 0.15s;
-    }
-    .tool-card:hover .card-arrow { opacity: 1; transform: translateX(0); }
-
-    .card-badge {
-      display: inline-block;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      background: var(--surface2);
-      color: var(--muted);
-      border-radius: 6px;
-      padding: 3px 8px;
-      margin-bottom: 12px;
-    }
-    .card-badge.live {
-      background: var(--accent) + "22";
-      color: var(--accent);
-      background: rgba(143,174,142,0.18);
-    }
-    .card-badge.ext {
-      background: rgba(56,189,248,0.12);
-      color: #38BDF8;
-    }
-
-    .divider {
-      max-width: 680px;
-      margin: 8px auto 0;
-      padding: 0 20px;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-
-    /* ── LOCK SCREEN THEME TOGGLE ── */
-    .lock-theme {
-      position: fixed;
-      top: 20px; right: 20px;
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 6px 10px;
-      cursor: pointer;
-      color: var(--muted);
-      font-size: 15px;
-    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;transition:background 0.3s,color 0.3s;}
+    #lock{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;}
+    .lock-card{background:var(--surface);border:1px solid var(--border);border-radius:24px;padding:48px 40px;width:100%;max-width:380px;text-align:center;box-shadow:var(--shadow);}
+    .lock-icon{width:56px;height:56px;border-radius:16px;background:var(--accent);display:flex;align-items:center;justify-content:center;margin:0 auto 24px;font-size:26px;}
+    .lock-title{font-size:22px;font-weight:800;letter-spacing:-0.5px;margin-bottom:6px;}
+    .lock-sub{font-size:13px;color:var(--muted);margin-bottom:28px;}
+    .lock-input{width:100%;padding:14px 18px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface2);color:var(--text);font-size:16px;font-family:inherit;outline:none;text-align:center;letter-spacing:0.15em;margin-bottom:12px;transition:border-color 0.2s;}
+    .lock-input:focus{border-color:var(--accent);}
+    .lock-btn{width:100%;padding:14px;border-radius:12px;border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;transition:background 0.2s;}
+    .lock-btn:hover{background:var(--accent2);}
+    .lock-error{font-size:13px;color:#F87171;margin-top:10px;min-height:18px;}
+    #hub{display:none;}
+    header{max-width:680px;margin:0 auto;padding:32px 20px 0;display:flex;align-items:center;justify-content:space-between;}
+    .header-left h1{font-size:26px;font-weight:800;letter-spacing:-0.6px;}
+    .header-left p{font-size:13px;color:var(--muted);margin-top:3px;}
+    .theme-btn{background:none;border:1px solid var(--border);border-radius:10px;padding:8px 12px;cursor:pointer;color:var(--muted);font-size:16px;transition:border-color 0.2s;}
+    .theme-btn:hover{border-color:var(--accent);}
+    .grid{max-width:680px;margin:28px auto 0;padding:0 20px 48px;display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+    @media(max-width:480px){.grid{grid-template-columns:1fr;}}
+    .tool-card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:24px;text-decoration:none;color:var(--text);display:block;transition:transform 0.15s,box-shadow 0.15s,border-color 0.15s;box-shadow:var(--shadow);position:relative;overflow:hidden;}
+    .tool-card:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,0.10);border-color:var(--accent);}
+    .tool-card.soon{opacity:0.5;cursor:default;pointer-events:none;}
+    .card-icon{font-size:28px;margin-bottom:14px;display:block;}
+    .card-name{font-size:16px;font-weight:700;margin-bottom:5px;letter-spacing:-0.3px;}
+    .card-desc{font-size:13px;color:var(--muted);line-height:1.5;}
+    .card-arrow{position:absolute;bottom:22px;right:22px;font-size:16px;color:var(--accent);opacity:0;transform:translateX(-4px);transition:opacity 0.15s,transform 0.15s;}
+    .tool-card:hover .card-arrow{opacity:1;transform:translateX(0);}
+    .card-badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;background:var(--surface2);color:var(--muted);border-radius:6px;padding:3px 8px;margin-bottom:12px;}
+    .card-badge.live{background:rgba(143,174,142,0.18);color:var(--accent);}
+    .card-badge.ext{background:rgba(56,189,248,0.12);color:#38BDF8;}
+    .divider{max-width:680px;margin:8px auto 0;padding:0 20px;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);}
+    .lock-theme{position:fixed;top:20px;right:20px;background:none;border:1px solid var(--border);border-radius:8px;padding:6px 10px;cursor:pointer;color:var(--muted);font-size:15px;}
   </style>
 </head>
 <body>
 
-  <!-- Theme toggle on lock screen -->
   <button class="lock-theme" onclick="toggleTheme()" id="lockThemeBtn">🌙</button>
 
-  <!-- ── LOCK SCREEN ── -->
   <div id="lock">
     <div class="lock-card">
       <div class="lock-icon">🏠</div>
       <div class="lock-title">Personal Hub</div>
       <div class="lock-sub">Enter your password to continue</div>
-      <input
-        class="lock-input"
-        type="password"
-        id="pwInput"
-        placeholder="••••••••"
-        onkeydown="if(event.key==='Enter') checkPw()"
-        autocomplete="current-password"
-      />
+      <input class="lock-input" type="password" id="pwInput" placeholder="••••••••"
+        onkeydown="if(event.key==='Enter') checkPw()" autocomplete="current-password" />
       <button class="lock-btn" onclick="checkPw()">Unlock</button>
       <div class="lock-error" id="lockError"></div>
     </div>
   </div>
 
-  <!-- ── MAIN HUB ── -->
   <div id="hub">
     <header>
       <div class="header-left">
@@ -297,7 +80,14 @@
 
     <div class="grid">
 
-      <!-- Check In -->
+      <a class="tool-card" href="TaskTracker.html">
+        <span class="card-badge live">Live</span>
+        <span class="card-icon">📋</span>
+        <div class="card-name">Task Tracker</div>
+        <div class="card-desc">Weekly goals and tasks, synced across devices via GitHub.</div>
+        <span class="card-arrow">→</span>
+      </a>
+
       <a class="tool-card" href="check-in.html">
         <span class="card-badge live">Live</span>
         <span class="card-icon">🧘</span>
@@ -306,16 +96,6 @@
         <span class="card-arrow">→</span>
       </a>
 
-      <!-- Task Tracker -->
-      <a class="tool-card" href="task-tracker.html">
-        <span class="card-badge live">Live</span>
-        <span class="card-icon">📋</span>
-        <div class="card-name">Task Tracker</div>
-        <div class="card-desc">Personal to-dos and task management, organized and persistent.</div>
-        <span class="card-arrow">→</span>
-      </a>
-
-      <!-- Budget -->
       <a class="tool-card" href="budget.html">
         <span class="card-badge live">Live</span>
         <span class="card-icon">💰</span>
@@ -324,7 +104,6 @@
         <span class="card-arrow">→</span>
       </a>
 
-      <!-- Work Hub -->
       <a class="tool-card" href="https://jacobbecicka.github.io/Receiving_Error_Dashboard" target="_blank" rel="noopener">
         <span class="card-badge ext">Work</span>
         <span class="card-icon">💼</span>
@@ -333,7 +112,6 @@
         <span class="card-arrow">↗</span>
       </a>
 
-      <!-- Coming Soon placeholder -->
       <div class="tool-card soon">
         <span class="card-badge">Coming Soon</span>
         <span class="card-icon">＋</span>
@@ -345,11 +123,7 @@
   </div>
 
   <script>
-    // ── PASSWORD ──────────────────────────────────────────
-    // Change this to whatever you want your password to be:
-    const PASSWORD = "712727";
-    // ──────────────────────────────────────────────────────
-
+    const PASSWORD    = "712727";
     const SESSION_KEY = "personal-hub-auth";
 
     function checkPw() {
@@ -369,16 +143,12 @@
       document.getElementById("lockThemeBtn").style.display = "none";
       document.getElementById("hub").style.display = "block";
       document.getElementById("dateLabel").textContent = new Date().toLocaleDateString("en-US", {
-        weekday: "long", month: "long", day: "numeric"
+        weekday:"long", month:"long", day:"numeric"
       });
     }
 
-    // Auto-unlock if already authed this session
-    if (sessionStorage.getItem(SESSION_KEY) === "true") {
-      showHub();
-    }
+    if (sessionStorage.getItem(SESSION_KEY) === "true") showHub();
 
-    // ── DARK MODE ─────────────────────────────────────────
     const THEME_KEY = "personal-hub-theme";
 
     function applyTheme(dark) {
@@ -391,14 +161,11 @@
 
     function toggleTheme() {
       const isDark = document.documentElement.getAttribute("data-theme") === "dark";
-      const next = !isDark;
-      localStorage.setItem(THEME_KEY, next ? "dark" : "light");
-      applyTheme(next);
+      localStorage.setItem(THEME_KEY, !isDark ? "dark" : "light");
+      applyTheme(!isDark);
     }
 
-    // Load saved theme
-    const savedTheme = localStorage.getItem(THEME_KEY);
-    if (savedTheme === "dark") applyTheme(true);
+    if (localStorage.getItem(THEME_KEY) === "dark") applyTheme(true);
   </script>
 </body>
 </html>
