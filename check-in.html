@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Check In</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 8px; border-radius: 4px; outline: none; cursor: pointer; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%; background: white; border: 3px solid var(--thumb-color, #C4785A); box-shadow: 0 2px 10px rgba(0,0,0,0.18); cursor: pointer; transition: border-color 0.3s; }
+    input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: white; border: 3px solid var(--thumb-color, #C4785A); cursor: pointer; }
+    button { font-family: 'Inter', system-ui, sans-serif; }
+    button:hover { opacity: 0.85; }
+    .cal-day:hover { opacity: 0.8; cursor: pointer; }
+    @media print { .no-print { display: none !important; } }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = Recharts;
+
+// ── CONSTANTS ─────────────────────────────────────────────
+const TIPS = [
+  { text: "Take 3 slow breaths — inhale 4 counts, hold 4, exhale 4.", seconds: 24 },
+  { text: "Drop your shoulders. Unclench your jaw. Soften your eyes.", seconds: 10 },
+  { text: "Place your hand on your chest. Feel your heartbeat for 15 seconds.", seconds: 15 },
+  { text: "Look around and quietly name 5 colors you can see right now.", seconds: 20 },
+  { text: "Squeeze your fists tight for 5 seconds, then release completely.", seconds: 10 },
+  { text: "Close your eyes and notice 3 things you can physically feel.", seconds: 20 },
+  { text: "Think of one thing — just one — you're grateful for today.", seconds: 15 },
+  { text: "Relax your forehead. Notice if you were holding tension there.", seconds: 10 },
+  { text: "Count slowly from 10 to 1, taking one breath per number.", seconds: 30 },
+  { text: "Inhale slowly through your nose, exhale through your mouth. Repeat twice.", seconds: 20 },
+  { text: "Roll your shoulders back once. Take a breath. Let it go.", seconds: 10 },
+  { text: "Close your eyes. Imagine somewhere peaceful for 20 seconds.", seconds: 20 },
+  { text: "Soften your gaze. Let your eyes rest without focusing on anything.", seconds: 15 },
+  { text: "Notice the weight of your body where it contacts the chair or floor.", seconds: 15 },
+  { text: "Take one full breath, hold for 2 counts, then sigh it out audibly.", seconds: 12 },
+];
+
+const SCORE_COLORS = {
+  1: "#D95F43", 2: "#D95F43", 3: "#E8894A",
+  4: "#D4A853", 5: "#D4A853", 6: "#A8B86A",
+  7: "#7BAF7A", 8: "#7BAF7A", 9: "#5A9E9E", 10: "#7B8EC4"
+};
+
+const SCORE_LABELS = {
+  1: "Struggling", 2: "Very hard", 3: "Hard",
+  4: "Low", 5: "Neutral", 6: "Okay",
+  7: "Good", 8: "Great", 9: "Excellent", 10: "Thriving"
+};
+
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+// ── STORAGE HELPERS ────────────────────────────────────────
+const lsGet = (key, fallback) => {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch { return fallback; }
+};
+const lsSet = (key, val) => {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+};
+
+// ── ICONS (inline SVG) ─────────────────────────────────────
+const Icon = ({ d, size = 16, stroke = "currentColor", fill = "none", ...rest }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    {Array.isArray(d) ? d.map((path, i) => <path key={i} d={path} />) : <path d={d} />}
+  </svg>
+);
+const IcoSun    = p => <Icon size={p.size||16} d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42M12 5a7 7 0 1 0 0 14A7 7 0 0 0 12 5z" />;
+const IcoMoon   = p => <Icon size={p.size||16} d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />;
+const IcoBack   = p => <Icon size={p.size||16} d="M19 12H5M12 19l-7-7 7-7" />;
+const IcoChart  = p => <Icon size={p.size||16} d={["M18 20V10","M12 20V4","M6 20v-6"]} />;
+const IcoCal    = p => <Icon size={p.size||16} d={["M8 2v4","M16 2v4","M3 10h18","M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"]} />;
+const IcoPrint  = p => <Icon size={p.size||16} d={["M6 9V2h12v7","M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2","M6 14h12v8H6z"]} />;
+const IcoPlus   = p => <Icon size={p.size||16} d="M12 5v14M5 12h14" />;
+const IcoX      = p => <Icon size={p.size||16} d="M18 6 6 18M6 6l12 12" />;
+const IcoRight  = p => <Icon size={p.size||16} d="M9 18l6-6-6-6" />;
+const IcoLeft   = p => <Icon size={p.size||16} d="M15 18l-6-6 6-6" />;
+const IcoHome   = p => <Icon size={p.size||16} d={["M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z","M9 22V12h6v10"]} />;
+const IcoEntry  = p => <Icon size={p.size||16} d={["M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7","M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"]} />;
+
+// ── THEME ──────────────────────────────────────────────────
+const getTheme = (dark) => ({
+  bg:       dark ? "#1C1814" : "#F5EFE6",
+  surface:  dark ? "#28221C" : "#FFFDF8",
+  surface2: dark ? "#332B23" : "#F0E9DC",
+  text:     dark ? "#EDE5D8" : "#3A2E25",
+  muted:    dark ? "#8A7A6A" : "#8A7060",
+  border:   dark ? "#3D3228" : "#DDD3C2",
+  accent:   "#C4785A",
+  accentBg: dark ? "#C4785A22" : "#C4785A15",
+});
+
+// ── MAIN APP ───────────────────────────────────────────────
+export default function CheckInApp() {
+  const [dark, setDark]               = useState(() => lsGet("ci-dark", false));
+  const [view, setView]               = useState("checkin");
+  const [users, setUsers]             = useState(() => lsGet("ci-users", []));
+  const [currentUser, setCurrentUser] = useState(() => { const u = lsGet("ci-users",[]); return u[0]||""; });
+  const [score, setScore]             = useState(5);
+  const [word, setWord]               = useState("");
+  const [tipIndex, setTipIndex]       = useState(() => Math.floor(Math.random()*TIPS.length));
+  const [entries, setEntries]         = useState(() => lsGet("ci-entries", []));
+  const [addingUser, setAddingUser]   = useState(false);
+  const [newName, setNewName]         = useState("");
+  const [submitted, setSubmitted]     = useState(false);
+  const [printing, setPrinting]       = useState(false);
+  const [calMonth, setCalMonth]       = useState(new Date().getMonth());
+  const [calYear, setCalYear]         = useState(new Date().getFullYear());
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [trendRange, setTrendRange]   = useState("30");
+
+  const T = getTheme(dark);
+
+  const saveUsers = (list) => { setUsers(list); lsSet("ci-users", list); };
+  const saveEntries = (list) => { setEntries(list); lsSet("ci-entries", list); };
+  const toggleDark = () => { setDark(d => { lsSet("ci-dark", !d); return !d; }); };
+
+  const addUser = () => {
+    if (!newName.trim()) return;
+    const list = [...users, newName.trim()];
+    saveUsers(list);
+    setCurrentUser(newName.trim());
+    setNewName(""); setAddingUser(false);
+  };
+
+  const removeUser = (name) => {
+    if (!window.confirm(`Remove ${name} and all their entries?`)) return;
+    const list = users.filter(u => u !== name);
+    saveUsers(list);
+    const kept = entries.filter(e => e.user !== name);
+    saveEntries(kept);
+    if (currentUser === name) setCurrentUser(list[0] || "");
+  };
+
+  const todayKey = () => new Date().toISOString().slice(0,10);
+
+  const todayEntry = entries.find(e => e.user === currentUser && e.dateKey === todayKey());
+
+  const handleSubmit = () => {
+    if (!currentUser || !word.trim()) return;
+    const now = new Date();
+    const entry = {
+      id: Date.now(),
+      user: currentUser,
+      score,
+      word: word.trim(),
+      timestamp: now.toISOString(),
+      dateKey: now.toISOString().slice(0,10),
+      date: now.toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" }),
+      shortDate: now.toLocaleDateString("en-US", { month:"short", day:"numeric" }),
+      month: now.getMonth(),
+      year: now.getFullYear(),
+      day: now.getDate(),
+    };
+    const updated = [entry, ...entries];
+    saveEntries(updated);
+    setSubmitted(true);
+    setTimeout(() => { setSubmitted(false); setWord(""); setScore(5); }, 2200);
+  };
+
+  const scoreColor = SCORE_COLORS[score] || T.accent;
+  const tip = TIPS[tipIndex];
+  const userEntries = entries.filter(e => e.user === currentUser);
+
+  // Calendar helpers
+  const daysInMonth = (m, y) => new Date(y, m+1, 0).getDate();
+  const firstDayOfMonth = (m, y) => new Date(y, m, 1).getDay();
+  const entryMap = {};
+  userEntries.forEach(e => { entryMap[e.dateKey] = e; });
+
+  const prevMonth = () => {
+    if (calMonth === 0) { setCalMonth(11); setCalYear(y => y-1); }
+    else setCalMonth(m => m-1);
+    setSelectedDay(null);
+  };
+  const nextMonth = () => {
+    const now = new Date();
+    if (calYear > now.getFullYear() || (calYear === now.getFullYear() && calMonth >= now.getMonth())) return;
+    if (calMonth === 11) { setCalMonth(0); setCalYear(y => y+1); }
+    else setCalMonth(m => m+1);
+    setSelectedDay(null);
+  };
+
+  // Trend data
+  const getTrendEntries = () => {
+    const now = Date.now();
+    const days = trendRange === "all" ? Infinity : parseInt(trendRange);
+    return [...userEntries]
+      .filter(e => days === Infinity || (now - new Date(e.timestamp).getTime()) <= days*86400000)
+      .reverse();
+  };
+
+  const trendEntries = getTrendEntries();
+  const streak = (() => {
+    let s = 0, d = new Date();
+    d.setHours(0,0,0,0);
+    while (true) {
+      const key = d.toISOString().slice(0,10);
+      if (userEntries.find(e => e.dateKey === key)) { s++; d.setDate(d.getDate()-1); }
+      else break;
+      if (s > 365) break;
+    }
+    return s;
+  })();
+
+  // ── PRINT VIEW ────────────────────────────────────────────
+  if (printing) {
+    return (
+      <div style={{ minHeight:"100vh", backgroundColor:"#FFF9F5", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", fontFamily:"Inter,system-ui,sans-serif" }}>
+        <div className="no-print" style={{ position:"fixed", top:20, right:20, display:"flex", gap:10 }}>
+          <button onClick={() => window.print()} style={{ padding:"10px 20px", borderRadius:10, backgroundColor:T.accent, color:"#fff", border:"none", cursor:"pointer", fontWeight:600 }}>Print</button>
+          <button onClick={() => setPrinting(false)} style={{ padding:"10px 20px", borderRadius:10, backgroundColor:"#eee", color:"#333", border:"none", cursor:"pointer" }}>Back</button>
+        </div>
+        <div style={{ textAlign:"center", padding:60 }}>
+          <div style={{ fontSize:11, color:"#9A8E82", marginBottom:6, letterSpacing:"0.12em", textTransform:"uppercase" }}>Daily Check-In</div>
+          <div style={{ fontSize:18, color:"#3A2E25", fontWeight:700, marginBottom:3 }}>{currentUser}</div>
+          <div style={{ fontSize:13, color:"#9A8E82", marginBottom:40 }}>
+            {new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"})}
+          </div>
+          <div style={{ fontSize:160, fontWeight:900, color:scoreColor, lineHeight:1, marginBottom:16 }}>{score}</div>
+          <div style={{ fontSize:18, color:"#9A8E82", marginBottom:8 }}>{SCORE_LABELS[score]}</div>
+          {word && <div style={{ fontSize:28, color:"#3A2E25", fontStyle:"italic", marginTop:16 }}>"{word}"</div>}
+        </div>
+      </div>
+    );
+  }
+
+  // ── SHARED STYLES ──────────────────────────────────────────
+  const S = {
+    app: { minHeight:"100vh", backgroundColor:T.bg, color:T.text, fontFamily:"'Inter',system-ui,sans-serif", transition:"background 0.3s,color 0.3s" },
+    wrap: { maxWidth:520, margin:"0 auto", padding:"28px 18px 60px" },
+    header: { display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:26 },
+    title: { fontSize:26, fontWeight:900, letterSpacing:"-0.7px", color:T.text, lineHeight:1.1 },
+    subtitle: { fontSize:13, color:T.muted, marginTop:3 },
+    hBtns: { display:"flex", gap:7, alignItems:"center", flexWrap:"wrap", justifyContent:"flex-end" },
+    iconBtn: (active) => ({
+      background: active ? T.accentBg : "none",
+      border:`1px solid ${active ? T.accent : T.border}`,
+      borderRadius:10, padding:"7px 11px", cursor:"pointer",
+      color: active ? T.accent : T.muted,
+      display:"flex", alignItems:"center", gap:5, fontSize:12, fontWeight:500,
+    }),
+    card: { backgroundColor:T.surface, borderRadius:18, padding:"20px 20px", marginBottom:13, border:`1px solid ${T.border}` },
+    sectionLabel: { fontSize:10, fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase", color:T.accent, marginBottom:12 },
+    pill: (active) => ({
+      padding:"6px 15px", borderRadius:20, fontSize:13, cursor:"pointer",
+      border:`1.5px solid ${active ? T.accent : T.border}`,
+      backgroundColor: active ? T.accentBg : "transparent",
+      color: active ? T.accent : T.muted,
+      fontWeight: active ? 600 : 400,
+    }),
+    input: {
+      width:"100%", padding:"13px 15px", borderRadius:12,
+      border:`1.5px solid ${T.border}`, backgroundColor:T.surface2,
+      color:T.text, fontSize:16, outline:"none", boxSizing:"border-box",
+    },
+    submitBtn: (enabled) => ({
+      flex:1, padding:"14px", borderRadius:14, border:"none",
+      backgroundColor: enabled ? T.accent : T.border,
+      color: enabled ? "#fff" : T.muted,
+      fontSize:16, fontWeight:700, cursor: enabled ? "pointer" : "not-allowed",
+    }),
+    printBtn: {
+      padding:"14px 16px", borderRadius:14,
+      border:`1px solid ${T.border}`, backgroundColor:"transparent",
+      color:T.muted, cursor:"pointer", display:"flex", alignItems:"center",
+    },
+    badge: (sc) => ({
+      width:42, height:42, borderRadius:11, flexShrink:0,
+      backgroundColor:(SCORE_COLORS[sc]||T.accent)+"22",
+      color:SCORE_COLORS[sc]||T.accent,
+      display:"flex", alignItems:"center", justifyContent:"center",
+      fontWeight:800, fontSize:18,
+    }),
+    histRow: (last) => ({
+      display:"flex", alignItems:"center", gap:12, padding:"12px 0",
+      borderBottom: last ? "none" : `1px solid ${T.border}`,
+    }),
+    statBox: {
+      flex:1, backgroundColor:T.surface2, borderRadius:14, padding:"14px 16px",
+    },
+    statLabel: { fontSize:10, color:T.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 },
+    statVal: { fontSize:26, fontWeight:800 },
+  };
+
+  // ── CALENDAR VIEW ──────────────────────────────────────────
+  const CalendarView = () => {
+    const totalDays = daysInMonth(calMonth, calYear);
+    const startDay = firstDayOfMonth(calMonth, calYear);
+    const cells = [];
+    for (let i = 0; i < startDay; i++) cells.push(null);
+    for (let d = 1; d <= totalDays; d++) cells.push(d);
+    const now = new Date();
+    const isToday = (d) => d === now.getDate() && calMonth === now.getMonth() && calYear === now.getFullYear();
+    const isFuture = (d) => new Date(calYear, calMonth, d) > now;
+    const getKey = (d) => `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const selectedEntry = selectedDay ? entryMap[getKey(selectedDay)] : null;
+    const isNextDisabled = calYear > now.getFullYear() || (calYear === now.getFullYear() && calMonth >= now.getMonth());
+
+    return (
+      <div>
+        {/* User switcher */}
+        <div style={S.card}>
+          <div style={S.sectionLabel}>Viewing entries for</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+            {users.map(u => (
+              <button key={u} style={S.pill(u===currentUser)} onClick={() => { setCurrentUser(u); setSelectedDay(null); }}>{u}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Month nav */}
+        <div style={{ ...S.card, paddingBottom:16 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+            <button onClick={prevMonth} style={{ ...S.iconBtn(false), borderRadius:8, padding:"6px 10px" }}><IcoLeft size={14}/></button>
+            <div style={{ fontWeight:700, fontSize:16, color:T.text }}>{MONTHS[calMonth]} {calYear}</div>
+            <button onClick={nextMonth} disabled={isNextDisabled} style={{ ...S.iconBtn(false), borderRadius:8, padding:"6px 10px", opacity: isNextDisabled ? 0.3 : 1, cursor: isNextDisabled ? "not-allowed" : "pointer" }}><IcoRight size={14}/></button>
+          </div>
+
+          {/* Day labels */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:6 }}>
+            {DAYS.map(d => <div key={d} style={{ textAlign:"center", fontSize:10, color:T.muted, fontWeight:600, padding:"4px 0" }}>{d}</div>)}
+          </div>
+
+          {/* Calendar grid */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4 }}>
+            {cells.map((d, i) => {
+              if (!d) return <div key={`e${i}`} />;
+              const key = getKey(d);
+              const entry = entryMap[key];
+              const selected = selectedDay === d;
+              const future = isFuture(d);
+              return (
+                <div
+                  key={key}
+                  className="cal-day"
+                  onClick={() => !future && setSelectedDay(selected ? null : d)}
+                  style={{
+                    borderRadius:10, padding:"8px 4px", textAlign:"center",
+                    backgroundColor: selected ? T.accentBg : isToday(d) ? T.surface2 : "transparent",
+                    border: selected ? `1.5px solid ${T.accent}` : isToday(d) ? `1px solid ${T.border}` : "1.5px solid transparent",
+                    opacity: future ? 0.3 : 1,
+                    cursor: future ? "default" : "pointer",
+                  }}
+                >
+                  <div style={{ fontSize:13, fontWeight: isToday(d) ? 700 : 400, color: selected ? T.accent : T.text, marginBottom:4 }}>{d}</div>
+                  {entry
+                    ? <div style={{ width:8, height:8, borderRadius:"50%", backgroundColor:SCORE_COLORS[entry.score]||T.accent, margin:"0 auto" }} />
+                    : <div style={{ width:8, height:8, margin:"0 auto" }} />
+                  }
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Selected day detail */}
+        {selectedDay && (
+          <div style={S.card}>
+            {selectedEntry ? (
+              <>
+                <div style={S.sectionLabel}>{MONTHS[calMonth]} {selectedDay}, {calYear}</div>
+                <div style={{ display:"flex", alignItems:"center", gap:16 }}>
+                  <div style={{ width:64, height:64, borderRadius:16, backgroundColor:(SCORE_COLORS[selectedEntry.score]||T.accent)+"22", color:SCORE_COLORS[selectedEntry.score]||T.accent, display:"flex", alignItems:"center", justifyContent:"center", fontSize:36, fontWeight:900 }}>{selectedEntry.score}</div>
+                  <div>
+                    <div style={{ fontSize:20, fontWeight:700, color:T.text, fontStyle:"italic" }}>"{selectedEntry.word}"</div>
+                    <div style={{ fontSize:13, color:SCORE_COLORS[selectedEntry.score]||T.accent, fontWeight:600, marginTop:4 }}>{SCORE_LABELS[selectedEntry.score]}</div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={S.sectionLabel}>{MONTHS[calMonth]} {selectedDay}, {calYear}</div>
+                <div style={{ color:T.muted, fontSize:14 }}>No check-in recorded for this day.</div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── TRENDS VIEW ────────────────────────────────────────────
+  const TrendsView = () => {
+    const avg = trendEntries.length ? (trendEntries.reduce((a,b) => a+b.score,0)/trendEntries.length).toFixed(1) : "—";
+    return (
+      <div>
+        {/* User switcher */}
+        <div style={S.card}>
+          <div style={S.sectionLabel}>Viewing trends for</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+            {users.map(u => (
+              <button key={u} style={S.pill(u===currentUser)} onClick={() => setCurrentUser(u)}>{u}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={S.card}>
+          {/* Range filter */}
+          <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap" }}>
+            {[["7","7 Days"],["30","30 Days"],["90","90 Days"],["all","All Time"]].map(([v,l]) => (
+              <button key={v} style={{ ...S.pill(trendRange===v), fontSize:12, padding:"5px 13px" }} onClick={() => setTrendRange(v)}>{l}</button>
+            ))}
+          </div>
+
+          {/* Stats row */}
+          <div style={{ display:"flex", gap:10, marginBottom:20 }}>
+            <div style={S.statBox}>
+              <div style={S.statLabel}>Average</div>
+              <div style={{ ...S.statVal, color:T.accent }}>{avg}</div>
+            </div>
+            <div style={S.statBox}>
+              <div style={S.statLabel}>Entries</div>
+              <div style={{ ...S.statVal, color:T.text }}>{trendEntries.length}</div>
+            </div>
+            <div style={S.statBox}>
+              <div style={S.statLabel}>Streak</div>
+              <div style={{ ...S.statVal, color:T.text }}>{streak}d</div>
+            </div>
+            <div style={S.statBox}>
+              <div style={S.statLabel}>Last</div>
+              <div style={{ ...S.statVal, color:SCORE_COLORS[userEntries[0]?.score]||T.text }}>{userEntries[0]?.score ?? "—"}</div>
+            </div>
+          </div>
+
+          {trendEntries.length < 2 ? (
+            <div style={{ color:T.muted, fontSize:14, textAlign:"center", padding:"40px 0" }}>Check in at least twice to see your trend.</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={trendEntries} margin={{ top:4, right:4, bottom:0, left:-20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+                <XAxis dataKey="shortDate" tick={{ fontSize:10, fill:T.muted }} />
+                <YAxis domain={[0,10]} ticks={[0,2,4,6,8,10]} tick={{ fontSize:10, fill:T.muted }} />
+                <Tooltip
+                  contentStyle={{ backgroundColor:T.surface, border:`1px solid ${T.border}`, borderRadius:10, fontSize:13, color:T.text }}
+                  formatter={(val,_,props) => [`${val} — ${props.payload.word}`, "Score"]}
+                  labelStyle={{ color:T.muted, fontSize:11 }}
+                />
+                <Line type="monotone" dataKey="score" stroke={T.accent} strokeWidth={2.5} dot={{ r:4, fill:T.accent, strokeWidth:0 }} activeDot={{ r:6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ── MAIN RENDER ────────────────────────────────────────────
+  return (
+    <div style={S.app}>
+      <div style={S.wrap}>
+        {/* Header */}
+        <div style={S.header}>
+          <div>
+            <div style={S.title}>Check In</div>
+            <div style={S.subtitle}>{new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
+          </div>
+          <div style={S.hBtns}>
+            {view !== "checkin" && (
+              <button style={S.iconBtn(false)} onClick={() => setView("checkin")} title="Back to check-in">
+                <IcoEntry size={14}/> Entry
+              </button>
+            )}
+            {view === "checkin" && (
+              <>
+                <button style={S.iconBtn(false)} onClick={() => setView("calendar")} title="Calendar"><IcoCal size={14}/></button>
+                <button style={S.iconBtn(false)} onClick={() => setView("trends")} title="Trends"><IcoChart size={14}/></button>
+              </>
+            )}
+            <button style={S.iconBtn(false)} onClick={toggleDark} title="Toggle theme">
+              {dark ? <IcoSun size={14}/> : <IcoMoon size={14}/>}
+            </button>
+            <a href="index.html" style={{ ...S.iconBtn(false), textDecoration:"none" }} title="Hub">
+              <IcoHome size={14}/>
+            </a>
+          </div>
+        </div>
+
+        {/* ── CHECK IN VIEW ── */}
+        {view === "checkin" && (
+          <>
+            {/* Today's existing entry */}
+            {todayEntry && (
+              <div style={{ ...S.card, borderColor:T.accent+"55", backgroundColor:T.accentBg }}>
+                <div style={S.sectionLabel}>Today's check-in</div>
+                <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+                  <div style={{ width:52, height:52, borderRadius:13, backgroundColor:(SCORE_COLORS[todayEntry.score]||T.accent)+"25", color:SCORE_COLORS[todayEntry.score]||T.accent, display:"flex", alignItems:"center", justifyContent:"center", fontSize:28, fontWeight:900 }}>{todayEntry.score}</div>
+                  <div>
+                    <div style={{ fontSize:17, fontWeight:600, color:T.text, fontStyle:"italic" }}>"{todayEntry.word}"</div>
+                    <div style={{ fontSize:12, color:T.muted, marginTop:3 }}>{SCORE_LABELS[todayEntry.score]}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize:11, color:T.muted, marginTop:12 }}>You can log another entry below if needed.</div>
+              </div>
+            )}
+
+            {/* User selector */}
+            <div style={S.card}>
+              <div style={S.sectionLabel}>Who's checking in?</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                {users.map(u => (
+                  <div key={u} style={{ display:"flex", alignItems:"center", gap:4 }}>
+                    <button style={S.pill(u===currentUser)} onClick={() => setCurrentUser(u)}>{u}</button>
+                    {users.length > 1 && (
+                      <button onClick={() => removeUser(u)} style={{ background:"none", border:"none", cursor:"pointer", color:T.muted, padding:"2px", display:"flex", alignItems:"center" }} title={`Remove ${u}`}><IcoX size={11}/></button>
+                    )}
+                  </div>
+                ))}
+                {addingUser ? (
+                  <div style={{ display:"flex", gap:8, width:"100%", marginTop:8 }}>
+                    <input style={{ ...S.input, padding:"8px 12px", fontSize:14 }} placeholder="Name" value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter")addUser(); if(e.key==="Escape")setAddingUser(false); }} autoFocus />
+                    <button style={{ padding:"8px 14px", borderRadius:10, backgroundColor:T.accent, color:"#fff", border:"none", cursor:"pointer", fontWeight:600 }} onClick={addUser}>Add</button>
+                    <button style={{ padding:"8px", borderRadius:10, background:"none", color:T.muted, border:`1px solid ${T.border}`, cursor:"pointer" }} onClick={()=>setAddingUser(false)}><IcoX size={13}/></button>
+                  </div>
+                ) : (
+                  <button style={{ ...S.pill(false), display:"flex", alignItems:"center", gap:4 }} onClick={()=>setAddingUser(true)}><IcoPlus size={12}/> Add person</button>
+                )}
+              </div>
+            </div>
+
+            {/* Meditation tip */}
+            <div style={S.card}>
+              <div style={S.sectionLabel}>Take a moment first</div>
+              <div style={{ fontSize:15, lineHeight:1.7, color:T.text, marginBottom:14 }}>{tip.text}</div>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span style={{ fontSize:12, color:T.muted }}>~{tip.seconds} seconds</span>
+                <button style={{ background:"none", border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 13px", cursor:"pointer", color:T.muted, fontSize:13, display:"flex", alignItems:"center", gap:4 }}
+                  onClick={()=>setTipIndex((tipIndex+1)%TIPS.length)}>
+                  Next <IcoRight size={13}/>
+                </button>
+              </div>
+            </div>
+
+            {/* Slider */}
+            <div style={S.card}>
+              <div style={S.sectionLabel}>How are you feeling today?</div>
+              <div style={{ fontSize:92, fontWeight:900, textAlign:"center", lineHeight:1, color:scoreColor, transition:"color 0.25s", marginBottom:4 }}>{score}</div>
+              <div style={{ fontSize:14, color:scoreColor, textAlign:"center", fontWeight:600, marginBottom:18 }}>{SCORE_LABELS[score]}</div>
+              <style>{`#score-slider { --thumb-color: ${scoreColor}; background: linear-gradient(to right,#D95F43 0%,#E8894A 25%,#D4A853 45%,#A8B86A 60%,#7BAF7A 72%,#5A9E9E 86%,#7B8EC4 100%); }`}</style>
+              <input id="score-slider" type="range" min="1" max="10" step="1" value={score} onChange={e=>setScore(Number(e.target.value))} />
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:T.muted, marginTop:8 }}>
+                <span>1 — Struggling</span><span>10 — Thriving</span>
+              </div>
+            </div>
+
+            {/* Word */}
+            <div style={S.card}>
+              <div style={S.sectionLabel}>One word or phrase</div>
+              <input style={S.input} placeholder="How would you describe it?" value={word} onChange={e=>setWord(e.target.value)} maxLength={80} />
+            </div>
+
+            {/* Actions */}
+            <div style={{ display:"flex", gap:10 }}>
+              <button style={S.submitBtn(!submitted && !!currentUser && !!word.trim())} onClick={handleSubmit} disabled={!currentUser||!word.trim()}>
+                {submitted ? "✓ Saved" : "Save Check-In"}
+              </button>
+              <button style={S.printBtn} onClick={()=>setPrinting(true)} title="Print score card"><IcoPrint size={18}/></button>
+            </div>
+          </>
+        )}
+
+        {view === "calendar" && <CalendarView />}
+        {view === "trends"  && <TrendsView />}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<CheckInApp />);
+</script>
+</body>
+</html>
