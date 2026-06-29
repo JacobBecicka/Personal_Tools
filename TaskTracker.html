@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Task Tracker</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'DM Sans', 'Segoe UI', sans-serif; }
+    ::-webkit-scrollbar { height: 4px; width: 4px; }
+    ::-webkit-scrollbar-track { background: #dde3ea; }
+    ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ── Config keys (credentials in localStorage only) ────────────────────────────
+const CRED_KEY     = "task_tracker_creds_v1";
+const GIST_FILE    = "tasks.json";
+const HUB_URL      = "index.html";
+const DEBOUNCE_MS  = 1500;
+
+const loadCreds = () => {
+  try { return JSON.parse(localStorage.getItem(CRED_KEY)) || null; }
+  catch { return null; }
+};
+const saveCreds = (c) => localStorage.setItem(CRED_KEY, JSON.stringify(c));
+const clearCreds = () => localStorage.removeItem(CRED_KEY);
+
+// ── GitHub Gist API ───────────────────────────────────────────────────────────
+const gistRead = async (token, gistId) => {
+  const r = await fetch(`https://api.github.com/gists/${gistId}`, {
+    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json" }
+  });
+  if (!r.ok) throw new Error(`Read failed: ${r.status}`);
+  const d = await r.json();
+  const raw = d.files?.[GIST_FILE]?.content;
+  if (!raw) throw new Error("tasks.json not found in Gist");
+  return JSON.parse(raw);
+};
+
+const gistWrite = async (token, gistId, data) => {
+  const r = await fetch(`https://api.github.com/gists/${gistId}`, {
+    method: "PATCH",
+    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json", "Content-Type": "application/json" },
+    body: JSON.stringify({ files: { [GIST_FILE]: { content: JSON.stringify(data) } } })
+  });
+  if (!r.ok) throw new Error(`Write failed: ${r.status}`);
+};
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+const getWeekLabel = (date = new Date()) => {
+  const d = new Date(date), day = d.getDay();
+  const monday = new Date(d.setDate(d.getDate() - day + (day === 0 ? -6 : 1)));
+  return monday.toISOString().split("T")[0];
+};
+const weekDisplay = (iso) =>
+  new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
+const getPrevWeekLabel = (iso) => {
+  const d = new Date(iso + "T12:00:00");
+  d.setDate(d.getDate() - 7);
+  return d.toISOString().split("T")[0];
+};
+
+// ── Star Rating ───────────────────────────────────────────────────────────────
+const StarRating = ({ value, onChange, dark }) => (
+  <div style={{ display:"flex", gap:4 }}>
+    {[1,2,3,4,5].map((s) => (
+      <button key={s} onClick={() => onChange(s)} style={{
+        background:"none", border:"none", cursor:"pointer", fontSize:22, padding:0,
+        color: s <= value ? "#F59E0B" : dark ? "#444" : "#D1D5DB", transition:"color 0.15s"
+      }}>★</button>
+    ))}
+  </div>
+);
+
+// ── TaskCard (outside parent — prevents iOS keyboard collapse) ────────────────
+function TaskCard({ c, dark, t, view, expandedId, setExpandedId, editingId,
+                    setEditingId, editDraft, setEditDraft, uniqueGoals,
+                    updateCommitment, deleteCommitment,
+                    cardStyle, btnGhost, btnPrimary, inputStyle }) {
+  const isExpanded      = expandedId === c.id;
+  const isEditing       = editingId  === c.id;
+  const statusColor     = c.done === null ? t.pending     : c.done ? t.done     : t.notDone;
+  const statusTextColor = c.done === null ? t.pendingText : c.done ? t.doneText : t.notDoneText;
+  const statusLabel     = c.done === null ? "Pending"     : c.done ? "Done ✓"   : "Not Done ✗";
+
+  const [localNotes, setLocalNotes] = useState(c.notes || "");
+  useEffect(() => { setLocalNotes(c.notes || ""); }, [c.id]);
+
+  const startEdit  = () => { setEditDraft({ wig:c.wig, commitment:c.commitment }); setEditingId(c.id); setExpandedId(null); };
+  const cancelEdit = () => setEditingId(null);
+  const saveEdit   = () => {
+    if (!editDraft.wig.trim() || !editDraft.commitment.trim()) return;
+    updateCommitment(c.id, { wig:editDraft.wig.trim(), commitment:editDraft.commitment.trim() });
+    setEditingId(null);
+  };
+
+  return (
+    <div style={{ ...cardStyle, borderLeft:`4px solid ${c.done===null?t.border:c.done?"#10B981":"#EF4444"}`, transition:"all 0.2s" }}>
+      {isEditing ? (
+        <div>
+          <label style={{ display:"block", fontSize:12, color:t.sub, marginBottom:4, fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em" }}>Goal / Category</label>
+          <input list="goal-suggestions-edit" value={editDraft.wig}
+            onChange={(e) => setEditDraft((d) => ({ ...d, wig:e.target.value }))}
+            style={{ ...inputStyle, marginBottom:10 }} autoFocus />
+          <datalist id="goal-suggestions-edit">{uniqueGoals.map((g) => <option key={g} value={g} />)}</datalist>
+          <label style={{ display:"block", fontSize:12, color:t.sub, marginBottom:4, fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em" }}>Task</label>
+          <input value={editDraft.commitment}
+            onChange={(e) => setEditDraft((d) => ({ ...d, commitment:e.target.value }))}
+            style={{ ...inputStyle, marginBottom:12 }}
+            onKeyDown={(e) => { if (e.key==="Enter") saveEdit(); if (e.key==="Escape") cancelEdit(); }} />
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={saveEdit}   style={{ ...btnPrimary, padding:"6px 14px", fontSize:13 }}>Save</button>
+            <button onClick={cancelEdit} style={{ ...btnGhost,   padding:"6px 14px", fontSize:13 }}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12 }}>
+            <div style={{ flex:1 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4, flexWrap:"wrap" }}>
+                <span style={{ background:dark?"#1E3A5F":"#DBEAFE", color:dark?"#93C5FD":"#1D4ED8", borderRadius:5, padding:"2px 9px", fontSize:12, fontWeight:700, letterSpacing:"0.03em" }}>{c.wig}</span>
+                <span style={{ background:statusColor, color:statusTextColor, borderRadius:5, padding:"2px 9px", fontSize:12, fontWeight:600 }}>{statusLabel}</span>
+                {c.carriedFrom && <span style={{ background:dark?"#1C1A0E":"#FFFBEB", color:dark?"#FCD34D":"#92400E", borderRadius:5, padding:"2px 9px", fontSize:11, fontWeight:600, border:`1px solid ${dark?"#78350F":"#FDE68A"}` }}>↩ carried</span>}
+                {c.stars > 0 && <span style={{ fontSize:12, color:"#F59E0B", fontWeight:600 }}>{"★".repeat(c.stars)}{"☆".repeat(5-c.stars)}</span>}
+              </div>
+              <p style={{ margin:0, color:t.text, fontSize:15, fontWeight:500, lineHeight:1.4 }}>{c.commitment}</p>
+              {view === "goal" && <p style={{ margin:"4px 0 0", fontSize:12, color:t.sub }}>Week of {weekDisplay(c.week)}</p>}
+            </div>
+            <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+              <button onClick={() => setExpandedId(isExpanded?null:c.id)} style={{ ...btnGhost, padding:"5px 10px", fontSize:12 }}>{isExpanded?"Close":"Update"}</button>
+              <button onClick={startEdit} style={{ ...btnGhost, padding:"5px 10px", fontSize:12 }}>✏</button>
+              <button onClick={() => deleteCommitment(c.id)} style={{ ...btnGhost, padding:"5px 10px", fontSize:12, color:"#EF4444", borderColor:"#EF4444" }}>✕</button>
+            </div>
+          </div>
+          {isExpanded && (
+            <div style={{ marginTop:14, paddingTop:14, borderTop:`1px solid ${t.border}` }}>
+              <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                <button onClick={() => updateCommitment(c.id,{done:true})}  style={{ ...btnGhost, background:c.done===true?"#10B981":"none", color:c.done===true?"#fff":t.sub, borderColor:"#10B981", fontWeight:700 }}>✓ Done</button>
+                <button onClick={() => updateCommitment(c.id,{done:false})} style={{ ...btnGhost, background:c.done===false?"#EF4444":"none", color:c.done===false?"#fff":t.sub, borderColor:"#EF4444", fontWeight:700 }}>✗ Not Done</button>
+              </div>
+              <label style={{ display:"block", fontSize:13, color:t.sub, marginBottom:6, fontWeight:600 }}>Effectiveness</label>
+              <StarRating value={c.stars} onChange={(v) => updateCommitment(c.id,{stars:v})} dark={dark} />
+              <label style={{ display:"block", fontSize:13, color:t.sub, margin:"12px 0 6px", fontWeight:600 }}>What did I do / notes</label>
+              <textarea value={localNotes}
+                onChange={(e) => setLocalNotes(e.target.value)}
+                onBlur={() => { if (localNotes !== c.notes) updateCommitment(c.id,{notes:localNotes}); }}
+                placeholder="Describe what you did and how effective it was…"
+                rows={3} style={{ ...inputStyle, resize:"vertical", lineHeight:1.5 }} />
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Setup Screen ──────────────────────────────────────────────────────────────
+function SetupScreen({ onSave, dark, t }) {
+  const [token, setToken]   = useState("");
+  const [gistId, setGistId] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [error, setError]   = useState("");
+
+  const inputStyle = { background:t.bg, color:t.text, border:`1px solid ${t.border}`, borderRadius:7, padding:"10px 13px", fontFamily:"inherit", fontSize:14, width:"100%", outline:"none", marginBottom:12 };
+
+  const handleSave = async () => {
+    if (!token.trim() || !gistId.trim()) { setError("Both fields are required."); return; }
+    setTesting(true); setError("");
+    try {
+      await gistRead(token.trim(), gistId.trim());
+      saveCreds({ token: token.trim(), gistId: gistId.trim() });
+      onSave({ token: token.trim(), gistId: gistId.trim() });
+    } catch(e) {
+      setError("Could not connect: " + e.message + ". Check your token and Gist ID.");
+    }
+    setTesting(false);
+  };
+
+  return (
+    <div style={{ minHeight:"100vh", background:t.bg, display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
+      <div style={{ background:t.card, border:`1px solid ${t.border}`, borderRadius:12, padding:32, width:"100%", maxWidth:440 }}>
+        <h1 style={{ fontSize:22, fontWeight:800, marginBottom:6, letterSpacing:"-0.02em" }}>Task Tracker</h1>
+        <p style={{ fontSize:14, color:t.sub, marginBottom:24 }}>One-time setup — your credentials stay in this browser only.</p>
+
+        <label style={{ display:"block", fontSize:12, color:t.sub, marginBottom:5, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.06em" }}>GitHub Token (classic, gist scope)</label>
+        <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="ghp_..." style={inputStyle} />
+
+        <label style={{ display:"block", fontSize:12, color:t.sub, marginBottom:5, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.06em" }}>Gist ID</label>
+        <input value={gistId} onChange={(e) => setGistId(e.target.value)} placeholder="b4b7cd5070f90baea4ba864f27217551" style={inputStyle} />
+
+        {error && <p style={{ fontSize:13, color:"#EF4444", marginBottom:12 }}>{error}</p>}
+
+        <button onClick={handleSave} disabled={testing} style={{ background:"#2563EB", color:"#fff", border:"none", borderRadius:7, padding:"11px 20px", cursor:"pointer", fontFamily:"inherit", fontSize:15, fontWeight:700, width:"100%", opacity:testing?0.7:1 }}>
+          {testing ? "Connecting…" : "Connect & Start"}
+        </button>
+
+        <p style={{ fontSize:12, color:t.sub, marginTop:16, lineHeight:1.6 }}>
+          Your token is stored only in this browser's localStorage and sent only to GitHub's API. It is never stored in the HTML file.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+function TaskTracker() {
+  const [creds, setCreds]           = useState(loadCreds);
+  const [dark, setDark]             = useState(false);
+  const [commitments, setCommitments] = useState([]);
+  const [syncStatus, setSyncStatus] = useState("loading"); // loading | synced | saving | error
+  const [activeWeek, setActiveWeek] = useState(getWeekLabel());
+  const [showForm, setShowForm]     = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [view, setView]             = useState("week");
+  const [carryMsg, setCarryMsg]     = useState("");
+  const [form, setForm]             = useState({ wig:"", commitment:"" });
+  const [editingId, setEditingId]   = useState(null);
+  const [editDraft, setEditDraft]   = useState({ wig:"", commitment:"" });
+  const [showPDFPreview, setShowPDFPreview] = useState(false);
+  const [showSettings, setShowSettings]     = useState(false);
+  const saveTimer = useRef(null);
+  const isFirstLoad = useRef(true);
+
+  // Load from Gist on mount
+  useEffect(() => {
+    if (!creds) { setSyncStatus("idle"); return; }
+    setSyncStatus("loading");
+    gistRead(creds.token, creds.gistId)
+      .then((data) => { setCommitments(data); setSyncStatus("synced"); })
+      .catch(() => setSyncStatus("error"));
+  }, [creds]);
+
+  // Debounced save to Gist whenever commitments change
+  useEffect(() => {
+    if (!creds || syncStatus === "loading") return;
+    if (isFirstLoad.current) { isFirstLoad.current = false; return; }
+    setSyncStatus("saving");
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      gistWrite(creds.token, creds.gistId, commitments)
+        .then(() => setSyncStatus("synced"))
+        .catch(() => setSyncStatus("error"));
+    }, DEBOUNCE_MS);
+    return () => clearTimeout(saveTimer.current);
+  }, [commitments]);
+
+  // ── CRUD ────────────────────────────────────────────────────────────────
+  const addCommitment = () => {
+    if (!form.wig.trim() || !form.commitment.trim()) return;
+    setCommitments((prev) => [{
+      id: Date.now().toString(), week: activeWeek,
+      wig: form.wig.trim(), commitment: form.commitment.trim(),
+      done: null, notes: "", stars: 0, createdAt: new Date().toISOString(),
+    }, ...prev]);
+    setForm({ wig:"", commitment:"" });
+    setShowForm(false);
+  };
+
+  const updateCommitment = (id, patch) =>
+    setCommitments((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+
+  const deleteCommitment = (id) =>
+    setCommitments((prev) => prev.filter((c) => c.id !== id));
+
+  // ── Carry Forward ─────────────────────────────────────────────────────
+  const prevWeek = getPrevWeekLabel(activeWeek);
+  const carryableItems = commitments.filter((c) => {
+    if (c.week !== prevWeek || c.done === true) return false;
+    return !commitments.some((x) => x.week === activeWeek && x.wig === c.wig && x.commitment === c.commitment);
+  });
+  const carryForward = () => {
+    if (!carryableItems.length) return;
+    const copies = carryableItems.map((c) => ({
+      id: Date.now().toString() + Math.random().toString(36).slice(2),
+      week: activeWeek, wig: c.wig, commitment: c.commitment,
+      done: null, notes: "", stars: 0, carriedFrom: prevWeek, createdAt: new Date().toISOString(),
+    }));
+    setCommitments((prev) => [...copies, ...prev]);
+    setCarryMsg(`✓ ${copies.length} task${copies.length>1?"s":""} carried forward`);
+    setTimeout(() => setCarryMsg(""), 3000);
+  };
+
+  // ── Save / Share Report ──────────────────────────────────────────────
+  const saveReport = async () => {
+    if (!weekCommitments.length) return;
+    const byG = {};
+    weekCommitments.forEach((c) => { if (!byG[c.wig]) byG[c.wig]=[]; byG[c.wig].push(c); });
+    const done=weekCommitments.filter((c)=>c.done===true).length, notDone=weekCommitments.filter((c)=>c.done===false).length, pending=weekCommitments.filter((c)=>c.done===null).length, total=weekCommitments.length, pct=total>0?Math.round((done/total)*100):0;
+    const stars=(n)=>n>0?"★".repeat(n)+"☆".repeat(5-n):"—", sLabel=(d)=>d===true?"✓ Done":d===false?"✗ Not Done":"⏳ Pending", sColor=(d)=>d===true?"#065F46":d===false?"#9F1239":"#475569", sBg=(d)=>d===true?"#ECFDF5":d===false?"#FFF1F2":"#F8FAFC";
+    let plain=`TASK REPORT — Week of ${weekDisplay(activeWeek)}\nGenerated ${new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}\n${"─".repeat(40)}\n\n`;
+    Object.entries(byG).forEach(([goal,items])=>{ plain+=`📁 ${goal}\n`; items.forEach((c)=>{ plain+=`  ${sLabel(c.done)}  ${c.commitment}\n`; if(c.stars) plain+=`  Effectiveness: ${stars(c.stars)}\n`; if(c.notes) plain+=`  Notes: ${c.notes}\n`; plain+="\n"; }); });
+    plain+=`${"─".repeat(40)}\nTotal: ${total}  Done: ${done}  Completion: ${pct}%\n`;
+    let wigBlocks="";
+    Object.entries(byG).forEach(([goal,items])=>{ const rows=items.map((c)=>`<tr style="background:#fff;border:1px solid #e2e6ed;"><td style="padding:8px 10px;width:100px;vertical-align:top;"><span style="background:${sBg(c.done)};color:${sColor(c.done)};padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;">${sLabel(c.done)}</span></td><td style="padding:8px;vertical-align:top;"><div style="font-weight:500;font-size:13px;line-height:1.4;">${c.commitment}</div>${c.notes?`<div style="font-size:11px;color:#6B7280;margin-top:4px;font-style:italic;">${c.notes}</div>`:""}</td><td style="padding:8px 10px;color:#F59E0B;font-size:12px;text-align:right;vertical-align:top;white-space:nowrap;">${stars(c.stars)}</td></tr><tr><td colspan="3" style="height:4px;"></td></tr>`).join(""); wigBlocks+=`<div style="margin-bottom:18px;"><div style="background:#DBEAFE;color:#1D4ED8;font-weight:800;font-size:10px;padding:3px 10px;border-radius:4px;display:inline-block;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">📁 ${goal}</div><table style="width:100%;border-collapse:collapse;">${rows}</table></div>`; });
+    const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Task Report</title><style>@page{size:letter;margin:.75in}*{box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;color:#1a1d27;margin:0;padding:0;font-size:13px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div style="background:#2563EB;padding:18px 24px;border-radius:8px 8px 0 0;"><h1 style="margin:0;color:#fff;font-size:18px;font-weight:800;">Weekly Task Report</h1><p style="margin:4px 0 0;color:#93C5FD;font-size:12px;">Week of ${weekDisplay(activeWeek)}</p></div><div style="background:#f4f6f9;padding:20px 24px 24px;border:1px solid #e2e6ed;border-top:none;border-radius:0 0 8px 8px;">${wigBlocks}<div style="background:#fff;border:1px solid #e2e6ed;border-radius:6px;padding:12px;display:flex;justify-content:space-around;text-align:center;"><div><div style="font-size:20px;font-weight:800;color:#2563EB;">${total}</div><div style="font-size:10px;color:#6B7280;text-transform:uppercase;font-weight:600;">Total</div></div><div><div style="font-size:20px;font-weight:800;color:#10B981;">${done}</div><div style="font-size:10px;color:#6B7280;text-transform:uppercase;font-weight:600;">Done</div></div><div><div style="font-size:20px;font-weight:800;color:#EF4444;">${notDone}</div><div style="font-size:10px;color:#6B7280;text-transform:uppercase;font-weight:600;">Not Done</div></div><div><div style="font-size:20px;font-weight:800;color:#94A3B8;">${pending}</div><div style="font-size:10px;color:#6B7280;text-transform:uppercase;font-weight:600;">Pending</div></div><div><div style="font-size:20px;font-weight:800;color:#F59E0B;">${pct}%</div><div style="font-size:10px;color:#6B7280;text-transform:uppercase;font-weight:600;">Complete</div></div></div></div></body></html>`;
+    if (navigator.canShare) { try { const file=new File([new Blob([html],{type:"text/html"})],`Task-Report-${activeWeek}.html`,{type:"text/html"}); if(navigator.canShare({files:[file]})){await navigator.share({files:[file],title:`Task Report — Week of ${weekDisplay(activeWeek)}`});return;} } catch(e){if(e.name==="AbortError")return;} }
+    if (navigator.share) { try { await navigator.share({title:`Task Report — Week of ${weekDisplay(activeWeek)}`,text:plain}); return; } catch(e){if(e.name==="AbortError")return;} }
+    setShowPDFPreview(true);
+  };
+
+  // ── Computed ──────────────────────────────────────────────────────────
+  const weekCommitments = commitments.filter((c) => c.week === activeWeek);
+  const byGoal = commitments.reduce((acc,c) => { if(!acc[c.wig]) acc[c.wig]=[]; acc[c.wig].push(c); return acc; }, {});
+  const allWeeks    = [...new Set([activeWeek,...commitments.map((c)=>c.week)])].sort().reverse();
+  const uniqueGoals = [...new Set(commitments.map((c)=>c.wig).filter(Boolean))].sort();
+
+  // ── Theme ─────────────────────────────────────────────────────────────
+  const t = {
+    bg:dark?"#0F1117":"#F4F6F9", card:dark?"#1A1D27":"#FFFFFF",
+    border:dark?"#2A2D3A":"#E2E6ED", text:dark?"#E8EAF0":"#1A1D27",
+    sub:dark?"#7A7F9A":"#6B7280", accent:"#2563EB",
+    done:dark?"#064E3B":"#ECFDF5", doneText:dark?"#6EE7B7":"#065F46",
+    notDone:dark?"#450A0A":"#FFF1F2", notDoneText:dark?"#FCA5A5":"#9F1239",
+    pending:dark?"#1E293B":"#F8FAFC", pendingText:dark?"#94A3B8":"#475569",
+  };
+  const cardStyle  = { background:t.card, border:`1px solid ${t.border}`, borderRadius:10, padding:"16px 20px", marginBottom:10 };
+  const btnPrimary = { background:t.accent, color:"#fff", border:"none", borderRadius:7, padding:"8px 16px", cursor:"pointer", fontFamily:"inherit", fontSize:14, fontWeight:600 };
+  const btnGhost   = { background:"none", color:t.sub, border:`1px solid ${t.border}`, borderRadius:7, padding:"7px 14px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:500 };
+  const inputStyle = { background:t.bg, color:t.text, border:`1px solid ${t.border}`, borderRadius:7, padding:"9px 13px", fontFamily:"inherit", fontSize:14, width:"100%", boxSizing:"border-box", outline:"none" };
+  const sharedProps = { dark, t, view, expandedId, setExpandedId, editingId, setEditingId, editDraft, setEditDraft, uniqueGoals, updateCommitment, deleteCommitment, cardStyle, btnGhost, btnPrimary, inputStyle };
+
+  const syncDot = syncStatus==="synced"?"#10B981":syncStatus==="saving"?"#F59E0B":syncStatus==="error"?"#EF4444":"#94A3B8";
+  const syncLabel = syncStatus==="synced"?"Synced":syncStatus==="saving"?"Saving…":syncStatus==="error"?"Sync Error":"Loading…";
+
+  // Setup screen if no creds
+  if (!creds) return <SetupScreen onSave={(c) => { setCreds(c); isFirstLoad.current=true; }} dark={dark} t={t} />;
+
+  // Loading screen
+  if (syncStatus === "loading") return (
+    <div style={{ minHeight:"100vh", background:t.bg, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16 }}>
+      <div style={{ fontSize:32 }}>⏳</div>
+      <p style={{ color:t.sub, fontSize:15 }}>Loading your tasks from GitHub…</p>
+    </div>
+  );
+
+  return (
+    <div style={{ fontFamily:"'DM Sans','Segoe UI',sans-serif", background:t.bg, minHeight:"100vh", color:t.text, transition:"background 0.2s,color 0.2s" }}>
+
+      {/* PDF Preview */}
+      {showPDFPreview && (() => {
+        const byG2={}, done2=weekCommitments.filter((c)=>c.done===true).length, notDone2=weekCommitments.filter((c)=>c.done===false).length, pending2=weekCommitments.filter((c)=>c.done===null).length, total2=weekCommitments.length, pct2=total2>0?Math.round((done2/total2)*100):0;
+        weekCommitments.forEach((c)=>{ if(!byG2[c.wig]) byG2[c.wig]=[]; byG2[c.wig].push(c); });
+        const st=(n)=>n>0?"★".repeat(n)+"☆".repeat(5-n):"—", sI=(d)=>d===true?"✓":d===false?"✗":"⏳", sL=(d)=>d===true?"Done":d===false?"Not Done":"Pending", sC=(d)=>d===true?"#065F46":d===false?"#9F1239":"#475569", sB=(d)=>d===true?"#ECFDF5":d===false?"#FFF1F2":"#F8FAFC";
+        return (
+          <div style={{ position:"fixed", inset:0, zIndex:200, background:"#fff", overflowY:"auto", fontFamily:"'Segoe UI',Arial,sans-serif", color:"#1a1d27" }}>
+            <div style={{ background:"#1a1d27", padding:"12px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:10 }}>
+              <span style={{ color:"#93C5FD", fontSize:13, fontWeight:600 }}>📄 Report Preview — browser Print → Save as PDF</span>
+              <button onClick={() => setShowPDFPreview(false)} style={{ background:"none", border:"1px solid #444", color:"#fff", borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:13, fontWeight:600 }}>✕ Close</button>
+            </div>
+            <div style={{ maxWidth:680, margin:"24px auto", padding:"0 16px 40px" }}>
+              <div style={{ background:"#2563EB", padding:"20px 24px", borderRadius:"8px 8px 0 0" }}>
+                <h1 style={{ margin:0, color:"#fff", fontSize:20, fontWeight:800 }}>Weekly Task Report</h1>
+                <p style={{ margin:"5px 0 0", color:"#93C5FD", fontSize:13 }}>Week of {weekDisplay(activeWeek)}</p>
+              </div>
+              <div style={{ background:"#f4f6f9", padding:"20px 24px 24px", border:"1px solid #e2e6ed", borderTop:"none", borderRadius:"0 0 8px 8px" }}>
+                {Object.entries(byG2).map(([wig,items]) => (
+                  <div key={wig} style={{ marginBottom:20 }}>
+                    <div style={{ background:"#DBEAFE", color:"#1D4ED8", fontWeight:800, fontSize:11, padding:"3px 10px", borderRadius:4, display:"inline-block", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>📁 {wig}</div>
+                    <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                      {items.map((c,i) => (
+                        <React.Fragment key={c.id}>
+                          <tr style={{ background:"#fff", border:"1px solid #e2e6ed" }}>
+                            <td style={{ padding:"9px 10px", width:90, verticalAlign:"top" }}><span style={{ background:sB(c.done), color:sC(c.done), padding:"2px 7px", borderRadius:4, fontSize:11, fontWeight:700 }}>{sI(c.done)} {sL(c.done)}</span></td>
+                            <td style={{ padding:"9px 8px", verticalAlign:"top" }}><div style={{ fontWeight:500, fontSize:13, lineHeight:1.4 }}>{c.commitment}{c.carriedFrom&&<span style={{ background:"#FFFBEB", color:"#92400E", fontSize:10, padding:"1px 5px", borderRadius:3, fontWeight:600, marginLeft:6 }}>↩ carried</span>}</div>{c.notes&&<div style={{ fontSize:11, color:"#6B7280", marginTop:4, fontStyle:"italic" }}>{c.notes}</div>}</td>
+                            <td style={{ padding:"9px 10px", color:"#F59E0B", fontSize:13, textAlign:"right", verticalAlign:"top", whiteSpace:"nowrap" }}>{st(c.stars)}</td>
+                          </tr>
+                          {i<items.length-1&&<tr><td colSpan={3} style={{ height:4 }} /></tr>}
+                        </React.Fragment>
+                      ))}
+                    </table>
+                  </div>
+                ))}
+                <div style={{ background:"#fff", border:"1px solid #e2e6ed", borderRadius:6, padding:"12px 8px", display:"flex", justifyContent:"space-around", textAlign:"center", marginTop:4 }}>
+                  {[{val:total2,color:"#2563EB",lbl:"Total"},{val:done2,color:"#10B981",lbl:"Done"},{val:notDone2,color:"#EF4444",lbl:"Not Done"},{val:pending2,color:"#94A3B8",lbl:"Pending"},{val:`${pct2}%`,color:"#F59E0B",lbl:"Complete"}].map((s)=>(
+                    <div key={s.lbl}><div style={{ fontSize:20, fontWeight:800, color:s.color }}>{s.val}</div><div style={{ fontSize:10, color:"#6B7280", textTransform:"uppercase", fontWeight:600 }}>{s.lbl}</div></div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+          <div style={{ background:t.card, borderRadius:12, padding:28, width:"100%", maxWidth:400, border:`1px solid ${t.border}` }}>
+            <h2 style={{ margin:"0 0 16px", fontSize:18, fontWeight:800 }}>Settings</h2>
+            <p style={{ fontSize:13, color:t.sub, marginBottom:16 }}>Gist ID: <code style={{ background:t.bg, padding:"2px 6px", borderRadius:4, fontSize:12 }}>{creds.gistId}</code></p>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={() => { clearCreds(); setCreds(null); setShowSettings(false); }} style={{ ...btnGhost, color:"#EF4444", borderColor:"#EF4444" }}>Disconnect</button>
+              <button onClick={() => setShowSettings(false)} style={btnGhost}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <div style={{ background:t.card, borderBottom:`1px solid ${t.border}`, padding:"14px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10, position:"sticky", top:0, zIndex:10 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          <div>
+            <h1 style={{ margin:0, fontSize:19, fontWeight:800, letterSpacing:"-0.02em" }}>Task Tracker</h1>
+            <p style={{ margin:0, fontSize:12, color:t.sub }}>Goals · Tasks · Results</p>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px", background:t.bg, border:`1px solid ${t.border}`, borderRadius:20 }} title={syncLabel}>
+            <div style={{ width:8, height:8, borderRadius:"50%", background:syncDot, transition:"background 0.3s" }} />
+            <span style={{ fontSize:11, color:t.sub, fontWeight:600 }}>{syncLabel}</span>
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:7, alignItems:"center", flexWrap:"wrap" }}>
+          <div style={{ display:"flex", background:t.bg, borderRadius:8, border:`1px solid ${t.border}`, overflow:"hidden" }}>
+            {["week","goal"].map((v) => (
+              <button key={v} onClick={() => setView(v)} style={{ background:view===v?t.accent:"none", color:view===v?"#fff":t.sub, border:"none", padding:"6px 13px", cursor:"pointer", fontSize:13, fontWeight:600, fontFamily:"inherit" }}>
+                {v==="week"?"By Week":"By Goal"}
+              </button>
+            ))}
+          </div>
+          <button onClick={saveReport} disabled={!weekCommitments.length} style={{ ...btnGhost, fontSize:12, padding:"6px 12px" }}>📤 Save Report</button>
+          <button onClick={() => setDark((d)=>!d)} style={{ ...btnGhost, fontSize:15, padding:"6px 10px" }}>{dark?"☀️":"🌙"}</button>
+          <button onClick={() => setShowSettings(true)} style={{ ...btnGhost, fontSize:13, padding:"6px 10px" }}>⚙</button>
+          <a href={HUB_URL} style={{ ...btnGhost, textDecoration:"none", fontSize:12, padding:"6px 11px", display:"inline-block" }}>⌂ Hub</a>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div style={{ maxWidth:760, margin:"0 auto", padding:"20px 16px" }}>
+
+        {view === "week" && (
+          <div style={{ ...cardStyle, display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10, marginBottom:16 }}>
+            <div>
+              <p style={{ margin:0, fontSize:11, color:t.sub, fontWeight:600, textTransform:"uppercase", letterSpacing:"0.06em" }}>Active Week</p>
+              <p style={{ margin:"2px 0 0", fontSize:18, fontWeight:700 }}>Week of {weekDisplay(activeWeek)}</p>
+            </div>
+            <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+              <select value={activeWeek} onChange={(e) => setActiveWeek(e.target.value)} style={{ ...inputStyle, width:"auto", fontSize:13 }}>
+                {allWeeks.map((w) => <option key={w} value={w}>Week of {weekDisplay(w)}</option>)}
+              </select>
+              <button onClick={() => setActiveWeek(getWeekLabel())} style={{ ...btnGhost, fontSize:12 }}>Today</button>
+            </div>
+          </div>
+        )}
+
+        {view === "week" && weekCommitments.length > 0 && (
+          <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
+            {[
+              { label:"Total",    value:weekCommitments.length,                                 color:t.accent },
+              { label:"Done",     value:weekCommitments.filter((c)=>c.done===true).length,      color:"#10B981" },
+              { label:"Not Done", value:weekCommitments.filter((c)=>c.done===false).length,     color:"#EF4444" },
+              { label:"Pending",  value:weekCommitments.filter((c)=>c.done===null).length,      color:t.sub },
+            ].map((s) => (
+              <div key={s.label} style={{ ...cardStyle, flex:1, minWidth:70, textAlign:"center", padding:"10px 8px", marginBottom:0 }}>
+                <div style={{ fontSize:22, fontWeight:800, color:s.color }}>{s.value}</div>
+                <div style={{ fontSize:10, color:t.sub, fontWeight:600, textTransform:"uppercase", letterSpacing:"0.05em" }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {view === "week" && carryableItems.length > 0 && (
+          <div style={{ ...cardStyle, display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, marginBottom:12, borderColor:"#F59E0B", borderLeft:"4px solid #F59E0B", background:dark?"#1C1A0E":"#FFFBEB", flexWrap:"wrap" }}>
+            <div>
+              <p style={{ margin:0, fontSize:14, fontWeight:700, color:dark?"#FCD34D":"#92400E" }}>↩ {carryableItems.length} unfinished task{carryableItems.length>1?"s":""} from last week</p>
+              <p style={{ margin:"2px 0 0", fontSize:12, color:dark?"#A16207":"#B45309" }}>Week of {weekDisplay(prevWeek)} · {[...new Set(carryableItems.map(c=>c.wig))].join(", ")}</p>
+            </div>
+            <button onClick={carryForward} style={{ background:"#F59E0B", color:"#1C1917", border:"none", borderRadius:7, padding:"8px 16px", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700, flexShrink:0 }}>Carry Forward</button>
+          </div>
+        )}
+
+        {carryMsg && <div style={{ ...cardStyle, background:dark?"#064E3B":"#ECFDF5", borderColor:"#10B981", color:dark?"#6EE7B7":"#065F46", fontSize:14, fontWeight:600, marginBottom:12, textAlign:"center" }}>{carryMsg}</div>}
+
+        {view === "week" && (
+          <div style={{ marginBottom:16 }}>
+            {!showForm ? (
+              <button onClick={() => setShowForm(true)} style={{ ...btnPrimary, width:"100%", padding:"11px", fontSize:15 }}>+ Add Task</button>
+            ) : (
+              <div style={cardStyle}>
+                <h3 style={{ margin:"0 0 14px", fontSize:15, fontWeight:700 }}>New Task</h3>
+                <label style={{ display:"block", fontSize:13, color:t.sub, marginBottom:5, fontWeight:600 }}>Goal / Category</label>
+                <input list="goal-suggestions-form" value={form.wig} onChange={(e) => setForm((f)=>({...f,wig:e.target.value}))} placeholder="e.g. Work, Personal, Health…" style={{ ...inputStyle, marginBottom:12 }} />
+                <datalist id="goal-suggestions-form">{uniqueGoals.map((g)=><option key={g} value={g}/>)}</datalist>
+                <label style={{ display:"block", fontSize:13, color:t.sub, marginBottom:5, fontWeight:600 }}>Task</label>
+                <input value={form.commitment} onChange={(e) => setForm((f)=>({...f,commitment:e.target.value}))} placeholder="What do you want to accomplish?" style={{ ...inputStyle, marginBottom:14 }} onKeyDown={(e)=>e.key==="Enter"&&addCommitment()} />
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={addCommitment} style={btnPrimary}>Save Task</button>
+                  <button onClick={()=>{setShowForm(false);setForm({wig:"",commitment:""}); }} style={btnGhost}>Cancel</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {view === "week" && (
+          weekCommitments.length === 0
+            ? <div style={{ ...cardStyle, textAlign:"center", padding:"40px 20px" }}><p style={{ fontSize:32, margin:"0 0 8px" }}>📋</p><p style={{ margin:0, color:t.sub, fontSize:15 }}>No tasks for this week yet.</p></div>
+            : weekCommitments.map((c) => <TaskCard key={c.id} c={c} {...sharedProps} />)
+        )}
+
+        {view === "goal" && (
+          Object.keys(byGoal).length === 0
+            ? <div style={{ ...cardStyle, textAlign:"center", padding:"40px 20px" }}><p style={{ fontSize:32, margin:"0 0 8px" }}>📁</p><p style={{ margin:0, color:t.sub, fontSize:15 }}>No tasks yet. Switch to By Week to add some.</p></div>
+            : Object.entries(byGoal).sort(([a],[b])=>a.localeCompare(b)).map(([wig,items]) => (
+              <div key={wig} style={{ marginBottom:24 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                  <div style={{ height:2, flex:1, background:t.border }} />
+                  <span style={{ background:dark?"#1E3A5F":"#DBEAFE", color:dark?"#93C5FD":"#1D4ED8", borderRadius:6, padding:"4px 14px", fontSize:13, fontWeight:800, letterSpacing:"0.04em", textTransform:"uppercase" }}>📁 {wig}</span>
+                  <span style={{ fontSize:12, color:t.sub, fontWeight:600 }}>{items.filter(c=>c.done).length}/{items.length} done</span>
+                  <div style={{ height:2, flex:1, background:t.border }} />
+                </div>
+                {items.sort((a,b)=>b.week.localeCompare(a.week)).map((c)=><TaskCard key={c.id} c={c} {...sharedProps} />)}
+              </div>
+            ))
+        )}
+      </div>
+
+      <div style={{ textAlign:"center", padding:"16px", fontSize:11, color:t.sub }}>
+        Task Tracker · Synced to GitHub Gist
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<TaskTracker />);
+</script>
+</body>
+</html>
