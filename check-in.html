@@ -103,7 +103,7 @@ const getTheme = (dark) => ({
 });
 
 // ── MAIN APP ───────────────────────────────────────────────
-export default function CheckInApp() {
+function CheckInApp() {
   const [dark, setDark]               = useState(() => lsGet("ci-dark", false));
   const [view, setView]               = useState("checkin");
   const [users, setUsers]             = useState(() => lsGet("ci-users", []));
