@@ -46,7 +46,18 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js"></script>
+  <script>
+    // Fallback: if jsdelivr fails too, try unpkg as backup
+    setTimeout(function() {
+      if (typeof Recharts === 'undefined') {
+        var s = document.createElement('script');
+        s.src = 'https://unpkg.com/recharts@2.12.7/umd/Recharts.js';
+        s.onerror = function() { showDebug('Both jsdelivr and unpkg failed to load Recharts.'); };
+        document.head.appendChild(s);
+      }
+    }, 2500);
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <style>
@@ -68,7 +79,12 @@
 try {
 
 const { useState, useEffect, useCallback } = React;
-const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = Recharts;
+// Recharts may still be loading (fallback CDN swap can take a couple seconds),
+// so pull its pieces lazily instead of destructuring immediately.
+function getRecharts() {
+  if (typeof Recharts === 'undefined') return null;
+  return Recharts;
+}
 
 // ── CONSTANTS ─────────────────────────────────────────────
 const TIPS = [
@@ -162,6 +178,19 @@ function CheckInApp() {
   const [calYear, setCalYear]         = useState(new Date().getFullYear());
   const [selectedDay, setSelectedDay] = useState(null);
   const [trendRange, setTrendRange]   = useState("30");
+
+  const [rcReady, setRcReady] = useState(() => typeof Recharts !== 'undefined');
+
+  useEffect(() => {
+    if (rcReady) return;
+    const interval = setInterval(() => {
+      if (typeof Recharts !== 'undefined') {
+        setRcReady(true);
+        clearInterval(interval);
+      }
+    }, 300);
+    return () => clearInterval(interval);
+  }, [rcReady]);
 
   const T = getTheme(dark);
 
@@ -437,6 +466,7 @@ function CheckInApp() {
   // ── TRENDS VIEW ────────────────────────────────────────────
   const TrendsView = () => {
     const avg = trendEntries.length ? (trendEntries.reduce((a,b) => a+b.score,0)/trendEntries.length).toFixed(1) : "—";
+    const RC = getRecharts();
     return (
       <div>
         {/* User switcher */}
@@ -477,22 +507,24 @@ function CheckInApp() {
             </div>
           </div>
 
-          {trendEntries.length < 2 ? (
+          {!RC ? (
+            <div style={{ color:T.muted, fontSize:14, textAlign:"center", padding:"40px 0" }}>Chart library still loading — pull down to refresh in a moment.</div>
+          ) : trendEntries.length < 2 ? (
             <div style={{ color:T.muted, fontSize:14, textAlign:"center", padding:"40px 0" }}>Check in at least twice to see your trend.</div>
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={trendEntries} margin={{ top:4, right:4, bottom:0, left:-20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-                <XAxis dataKey="shortDate" tick={{ fontSize:10, fill:T.muted }} />
-                <YAxis domain={[0,10]} ticks={[0,2,4,6,8,10]} tick={{ fontSize:10, fill:T.muted }} />
-                <Tooltip
+            <RC.ResponsiveContainer width="100%" height={220}>
+              <RC.LineChart data={trendEntries} margin={{ top:4, right:4, bottom:0, left:-20 }}>
+                <RC.CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+                <RC.XAxis dataKey="shortDate" tick={{ fontSize:10, fill:T.muted }} />
+                <RC.YAxis domain={[0,10]} ticks={[0,2,4,6,8,10]} tick={{ fontSize:10, fill:T.muted }} />
+                <RC.Tooltip
                   contentStyle={{ backgroundColor:T.surface, border:`1px solid ${T.border}`, borderRadius:10, fontSize:13, color:T.text }}
                   formatter={(val,_,props) => [`${val} — ${props.payload.word}`, "Score"]}
                   labelStyle={{ color:T.muted, fontSize:11 }}
                 />
-                <Line type="monotone" dataKey="score" stroke={T.accent} strokeWidth={2.5} dot={{ r:4, fill:T.accent, strokeWidth:0 }} activeDot={{ r:6 }} />
-              </LineChart>
-            </ResponsiveContainer>
+                <RC.Line type="monotone" dataKey="score" stroke={T.accent} strokeWidth={2.5} dot={{ r:4, fill:T.accent, strokeWidth:0 }} activeDot={{ r:6 }} />
+              </RC.LineChart>
+            </RC.ResponsiveContainer>
           )}
         </div>
       </div>
