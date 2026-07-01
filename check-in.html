@@ -4,6 +4,45 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Check In</title>
+
+  <!-- ── DEBUG ERROR CATCHER ── shows crashes as visible red text on screen -->
+  <style>
+    #debug-box{display:none;position:fixed;top:0;left:0;right:0;z-index:999999;background:#2a0a0a;color:#ffb4b4;font-family:monospace;font-size:13px;padding:16px;white-space:pre-wrap;word-break:break-word;max-height:100vh;overflow:auto;border-bottom:4px solid #ff4444;}
+    #debug-box b{color:#ff8080;}
+  </style>
+  <script>
+    window.__debugLog = [];
+    function showDebug(msg) {
+      window.__debugLog.push(msg);
+      var box = document.getElementById('debug-box');
+      if (box) {
+        box.style.display = 'block';
+        box.textContent = '⚠ DEBUG ERRORS ⚠\n\n' + window.__debugLog.join('\n\n');
+      }
+    }
+    window.addEventListener('error', function(e) {
+      showDebug('JS ERROR: ' + e.message + '\nFile: ' + e.filename + ':' + e.lineno);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      showDebug('PROMISE REJECTION: ' + e.reason);
+    });
+    // Check after 4 seconds if key libraries loaded — catches silent CDN failures
+    setTimeout(function() {
+      var missing = [];
+      if (typeof React === 'undefined') missing.push('React');
+      if (typeof ReactDOM === 'undefined') missing.push('ReactDOM');
+      if (typeof Babel === 'undefined') missing.push('Babel');
+      if (typeof Recharts === 'undefined') missing.push('Recharts');
+      var root = document.getElementById('root');
+      if (missing.length) {
+        showDebug('MISSING LIBRARIES (failed to load from CDN): ' + missing.join(', '));
+      } else if (root && root.innerHTML.trim() === '') {
+        showDebug('All libraries loaded OK, but #root is still empty. Likely a JS error during render — check above for JS ERROR lines, or Babel failed to transpile silently.');
+      }
+    }, 4000);
+  </script>
+  <!-- ── END DEBUG ── -->
+
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -23,8 +62,11 @@
   </style>
 </head>
 <body>
+<div id="debug-box"></div>
 <div id="root"></div>
-<script type="text/babel">
+<script type="text/babel" onerror="showDebug('SCRIPT TAG onerror fired — babel script failed')">
+try {
+
 const { useState, useEffect, useCallback } = React;
 const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = Recharts;
 
@@ -579,6 +621,10 @@ function CheckInApp() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<CheckInApp />);
+
+} catch (err) {
+  showDebug('CAUGHT EXCEPTION: ' + err.message + '\n' + (err.stack || ''));
+}
 </script>
 </body>
 </html>
